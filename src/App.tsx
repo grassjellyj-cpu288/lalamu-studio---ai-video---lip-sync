@@ -10,8 +10,9 @@ import { AudioUploader } from './components/AudioUploader';
 import { StudioPlayer } from './components/StudioPlayer';
 import { EthicsNotice } from './components/EthicsNotice';
 import { PythonProjectModal } from './components/PythonProjectModal';
-import { AvatarPreset, MouthLandmarks, LipSyncConfig, FrameEnergyData, EyeLandmarks } from './types';
+import { AvatarPreset, MouthLandmarks, LipSyncConfig, FrameEnergyData, EyeLandmarks, BackgroundConfig } from './types';
 import { AVATAR_PRESETS, AUDIO_PRESETS } from './data/presets';
+import { BackgroundSelector } from './components/BackgroundSelector';
 import {
   decodeAudio,
   extractAudioEnergyCurve,
@@ -40,6 +41,23 @@ export default function App() {
   );
   const [showLandmarks, setShowLandmarks] = useState(false);
 
+  // Background Customization & PC Upload state
+  const [backgroundConfig, setBackgroundConfig] = useState<BackgroundConfig>({
+    enabled: false,
+    selectedPresetId: 'original',
+    type: 'original',
+    color: '#18181b',
+    blur: 0,
+    brightness: 100,
+    keyingMode: 'auto',
+    tolerance: 30,
+    feather: 6,
+    keyColor: '#00FF00',
+    characterScale: 1.0,
+    characterPositionX: 0,
+    characterPositionY: 0,
+  });
+
   // Audio state
   const [currentAudioBuffer, setCurrentAudioBuffer] = useState<AudioBuffer | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -56,6 +74,12 @@ export default function App() {
     jawDisplacement: 0, // คางไม่ขยับ (Chin locked in place)
     enableBlink: true,
     blinkInterval: 3.2,
+    mouthStyle: 'realistic-3d', // ปากขยับแบบ 3D ยิ้มเห็นฟันเรียงสวยเหมือนในรูป
+    showLowerTeeth: true,
+    lipGloss: true,
+    smileCurve: 3,
+    seamlessBlend: true,
+    lipFeather: 4,
   });
 
   const [frames, setFrames] = useState<FrameEnergyData[]>([]);
@@ -195,6 +219,21 @@ export default function App() {
   const handleResetStudio = () => {
     handleSelectPresetAvatar(AVATAR_PRESETS[0]);
     loadInitialAudio();
+    setBackgroundConfig({
+      enabled: false,
+      selectedPresetId: 'original',
+      type: 'original',
+      color: '#18181b',
+      blur: 0,
+      brightness: 100,
+      keyingMode: 'auto',
+      tolerance: 30,
+      feather: 6,
+      keyColor: '#00FF00',
+      characterScale: 1.0,
+      characterPositionX: 0,
+      characterPositionY: 0,
+    });
   };
 
   return (
@@ -223,31 +262,31 @@ export default function App() {
             </div>
             <p className="mt-1 text-sm text-zinc-400">
               {lang === 'th'
-                ? 'เลือกตัวละครการ์ตูน / อัปโหลดรูปภาพ + ไฟล์เสียง แล้วสร้างวิดีโอ "ปากขยับ" ตามเสียงพูดแบบเรียลไทม์ พร้อมดาวน์โหลด MP4'
-                : 'Select cartoon character or upload portrait + speech audio, then generate talking animation with audio-reactive lip-sync.'}
+                ? 'เลือกรูปการ์ตูน / อนิเมะ เปลี่ยนฉากหลัง หรืออัปโหลดรูปจาก PC + เสียงพากย์ แล้วสร้างและเซฟเป็นไฟล์วิดีโอ (MP4/WebM)'
+                : 'Select cartoon/anime character, customize backgrounds or upload from PC + speech audio, and export as video.'}
             </p>
           </div>
 
           {/* Quick Steps Navigation Pills */}
-          <div className="flex items-center gap-1.5 text-xs font-medium">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium">
             <span className="rounded-lg bg-zinc-900 border border-zinc-800 px-2.5 py-1 text-zinc-300">
               <span className="text-amber-400 font-bold mr-1">1.</span>
-              {lang === 'th' ? 'เลือกรูป' : 'Image'}
+              {lang === 'th' ? 'รูปการ์ตูน' : 'Character'}
             </span>
             <span className="text-zinc-600">&rarr;</span>
             <span className="rounded-lg bg-zinc-900 border border-zinc-800 px-2.5 py-1 text-zinc-300">
-              <span className="text-amber-400 font-bold mr-1">2.</span>
-              {lang === 'th' ? 'เลือกเสียง' : 'Audio'}
+              <span className="text-violet-400 font-bold mr-1">2.</span>
+              {lang === 'th' ? 'ฉากหลัง / PC' : 'Background / PC'}
             </span>
             <span className="text-zinc-600">&rarr;</span>
             <span className="rounded-lg bg-zinc-900 border border-zinc-800 px-2.5 py-1 text-zinc-300">
               <span className="text-amber-400 font-bold mr-1">3.</span>
-              {lang === 'th' ? 'เริ่ม Lip Sync' : 'Sync'}
+              {lang === 'th' ? 'เสียงพากย์' : 'Audio'}
             </span>
             <span className="text-zinc-600">&rarr;</span>
             <span className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 text-amber-300 font-semibold">
               <span className="text-amber-400 font-bold mr-1">4.</span>
-              {lang === 'th' ? 'Export วิดีโอ' : 'Export'}
+              {lang === 'th' ? 'Lip Sync & เซฟวิดีโอ' : 'Sync & Save Video'}
             </span>
           </div>
         </div>
@@ -282,6 +321,13 @@ export default function App() {
           />
         </div>
 
+        {/* Step 2.5: Custom Background Selector & PC Image Upload */}
+        <BackgroundSelector
+          config={backgroundConfig}
+          onChangeConfig={setBackgroundConfig}
+          lang={lang}
+        />
+
         {/* Step 3 & 4: Main Studio Monitor & Video Exporter */}
         <StudioPlayer
           imageElement={imageElement}
@@ -299,6 +345,8 @@ export default function App() {
           showLandmarks={showLandmarks}
           setShowLandmarks={setShowLandmarks}
           lang={lang}
+          backgroundConfig={backgroundConfig}
+          onChangeBackgroundConfig={setBackgroundConfig}
         />
 
         {/* Information & Ethical Usage Safeguards */}

@@ -20,10 +20,12 @@ import {
   Crop,
   Ruler,
 } from 'lucide-react';
-import { MouthLandmarks, LipSyncConfig, FrameEnergyData, EyeLandmarks } from '../types';
+import { MouthLandmarks, LipSyncConfig, FrameEnergyData, EyeLandmarks, BackgroundConfig } from '../types';
 import { renderLipSyncFrame } from '../utils/lipsyncRenderer';
 import { exportLipSyncVideo, ExportProgress } from '../utils/videoExporter';
-import { getAudioContext } from '../utils/audioAnalyzer';
+import { getAudioContext, extractAudioEnergyCurve } from '../utils/audioAnalyzer';
+import { createCharacterCutout } from '../utils/backgroundMatting';
+import { BACKGROUND_PRESETS } from '../data/backgrounds';
 import {
   getCanvasPercentageCoords,
   hitTestLandmark,
@@ -49,6 +51,8 @@ interface StudioPlayerProps {
   showLandmarks: boolean;
   setShowLandmarks?: (show: boolean) => void;
   lang: 'th' | 'en';
+  backgroundConfig?: BackgroundConfig;
+  onChangeBackgroundConfig?: (config: BackgroundConfig) => void;
 }
 
 export const StudioPlayer: React.FC<StudioPlayerProps> = ({
@@ -67,9 +71,82 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
   showLandmarks,
   setShowLandmarks,
   lang,
+  backgroundConfig,
+  onChangeBackgroundConfig,
 }) => {
   const isTh = lang === 'th';
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Background Image & Matting Cutout Cache
+  const [bgImageElement, setBgImageElement] = useState<HTMLImageElement | null>(null);
+  const [cutoutCanvas, setCutoutCanvas] = useState<HTMLCanvasElement | null>(null);
+
+  // Load Background Image
+  useEffect(() => {
+    if (!backgroundConfig || !backgroundConfig.enabled || backgroundConfig.type === 'original') {
+      setBgImageElement(null);
+      return;
+    }
+
+    let urlToLoad: string | undefined;
+    if (backgroundConfig.type === 'custom') {
+      urlToLoad = backgroundConfig.customImageUrl;
+    } else if (backgroundConfig.selectedPresetId) {
+      const preset = BACKGROUND_PRESETS.find((p) => p.id === backgroundConfig.selectedPresetId);
+      urlToLoad = preset?.thumbnail;
+    }
+
+    if (!urlToLoad) {
+      setBgImageElement(null);
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      setBgImageElement(img);
+    };
+    img.onerror = () => {
+      console.warn('Could not load background image:', urlToLoad);
+      setBgImageElement(null);
+    };
+    img.src = urlToLoad;
+  }, [
+    backgroundConfig?.enabled,
+    backgroundConfig?.selectedPresetId,
+    backgroundConfig?.type,
+    backgroundConfig?.customImageUrl,
+  ]);
+
+  // Generate Character Cutout
+  useEffect(() => {
+    if (
+      !imageElement ||
+      !backgroundConfig ||
+      !backgroundConfig.enabled ||
+      backgroundConfig.type === 'original' ||
+      backgroundConfig.keyingMode === 'none'
+    ) {
+      setCutoutCanvas(null);
+      return;
+    }
+
+    try {
+      const cutout = createCharacterCutout(imageElement, backgroundConfig);
+      setCutoutCanvas(cutout);
+    } catch (err) {
+      console.warn('Could not generate character cutout:', err);
+      setCutoutCanvas(null);
+    }
+  }, [
+    imageElement,
+    backgroundConfig?.enabled,
+    backgroundConfig?.type,
+    backgroundConfig?.keyingMode,
+    backgroundConfig?.tolerance,
+    backgroundConfig?.feather,
+    backgroundConfig?.keyColor,
+  ]);
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -86,6 +163,8 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [manualBlinkProgress, setManualBlinkProgress] = useState<number>(0);
   const blinkAnimRef = useRef<number | null>(null);
+  const [testAperture, setTestAperture] = useState<number>(0);
+  const mouthAnimRef = useRef<number | null>(null);
 
   // Export state
   const [isExporting, setIsExporting] = useState(false);
@@ -120,7 +199,7 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
     if (!ctx) return;
 
     const frameData = frames[currentFrameIndex];
-    const aperture = isGenerated && frameData ? frameData.aperture : 0;
+    const aperture = testAperture > 0 ? testAperture : (isGenerated && frameData ? frameData.aperture : 0);
     const timeSec = frameData ? frameData.time : currentFrameIndex / config.fps;
 
     renderLipSyncFrame(
@@ -132,7 +211,10 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
       timeSec,
       showLandmarks || mouseEditMode,
       eyeLandmarks,
-      manualBlinkProgress
+      manualBlinkProgress,
+      backgroundConfig,
+      bgImageElement,
+      cutoutCanvas
     );
   }, [
     imageElement,
@@ -145,6 +227,10 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
     mouseEditMode,
     eyeLandmarks,
     manualBlinkProgress,
+    testAperture,
+    backgroundConfig,
+    bgImageElement,
+    cutoutCanvas,
   ]);
 
   // Trigger smooth manual blink simulation
@@ -165,6 +251,29 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
       blinkAnimRef.current = requestAnimationFrame(animateBlink);
     };
     blinkAnimRef.current = requestAnimationFrame(animateBlink);
+  };
+
+  // Trigger smooth test mouth movement matching the photo
+  const handleTriggerMouthTest = () => {
+    if (mouthAnimRef.current) cancelAnimationFrame(mouthAnimRef.current);
+    const start = performance.now();
+    const duration = 1600; // 1.6s speech movement test
+
+    const animateMouth = (now: number) => {
+      const elapsed = now - start;
+      if (elapsed >= duration) {
+        setTestAperture(0);
+        return;
+      }
+      const t = elapsed / duration;
+      // 2 smooth expressive speech syllable curves resembling active speaking
+      const phase1 = Math.sin(t * Math.PI * 2);
+      const envelope = Math.sin(t * Math.PI);
+      const val = Math.max(0, (0.5 * phase1 + 0.5) * envelope * 0.85);
+      setTestAperture(val);
+      mouthAnimRef.current = requestAnimationFrame(animateMouth);
+    };
+    mouthAnimRef.current = requestAnimationFrame(animateMouth);
   };
 
   // Canvas Mouse & Touch Drag/Placement Handlers
@@ -342,6 +451,10 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
         cancelAnimationFrame(blinkAnimRef.current);
         blinkAnimRef.current = null;
       }
+      if (mouthAnimRef.current) {
+        cancelAnimationFrame(mouthAnimRef.current);
+        mouthAnimRef.current = null;
+      }
       stopAudioSource();
     };
   }, []);
@@ -446,13 +559,25 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
 
   // Video Export Handler
   const handleExport = async () => {
-    if (!imageElement || !audioBuffer || !isGenerated || frames.length === 0) {
+    if (!imageElement || !audioBuffer) {
       setNoticeMessage({
-        text: isTh ? 'กรุณากด "เริ่ม Lip Sync" ก่อนส่งออกวิดีโอ' : 'Please run "Start Lip Sync" first.',
+        text: isTh ? 'กรุณาเลือกรูปตัวละครและไฟล์เสียงก่อนเซฟวิดีโอ' : 'Please select character and audio first.',
         type: 'error',
       });
       setTimeout(() => setNoticeMessage(null), 4000);
       return;
+    }
+
+    let activeFrames = frames;
+    if (!isGenerated || activeFrames.length === 0) {
+      // Auto-extract lip sync curves if user hasn't pressed Start Lip Sync yet
+      const analysis = extractAudioEnergyCurve(
+        audioBuffer,
+        config.fps,
+        config.smoothness,
+        config.openThreshold
+      );
+      activeFrames = analysis.frames;
     }
 
     pausePlayback();
@@ -460,7 +585,7 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
     setExportProgress({
       percent: 0,
       currentFrame: 0,
-      totalFrames: frames.length,
+      totalFrames: activeFrames.length,
       status: isTh ? 'เตรียมการเรนเดอร์...' : 'Preparing render...',
     });
 
@@ -469,10 +594,13 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
         imageElement,
         audioBuffer,
         mouthLandmarks,
-        frames,
+        activeFrames,
         config,
         (p) => setExportProgress(p),
-        eyeLandmarks
+        eyeLandmarks,
+        backgroundConfig,
+        bgImageElement,
+        cutoutCanvas
       );
 
       setExportedVideoUrl(result.url);
@@ -595,83 +723,155 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
 
           {/* Primary Step 4: Export Video Button */}
           <button
+            id="export-video-btn"
             type="button"
             onClick={handleExport}
-            disabled={!isGenerated || isExporting}
-            className="flex items-center gap-2 rounded-lg bg-zinc-800 border border-zinc-700 px-4 py-2 text-xs font-bold text-white hover:bg-zinc-700 hover:border-amber-400/50 disabled:opacity-40 transition"
+            disabled={(!imageElement || !audioBuffer) || isExporting}
+            className="flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 text-xs font-bold shadow-md shadow-emerald-950/40 border border-emerald-400/40 transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={isTh ? 'ประมวลผลและเซฟเป็นไฟล์วิดีโอ (MP4/WebM) ลงเครื่อง' : 'Render and save as video file (MP4/WebM)'}
           >
-            <Video className="h-4 w-4 text-amber-400" />
-            <span className="hidden sm:inline">{isTh ? '🎬 Export วิดีโอ' : '🎬 Export Video'}</span>
-            <span className="sm:hidden">Export</span>
+            <Download className="h-4 w-4 text-emerald-100" />
+            <span>{isTh ? '💾 เซฟไฟล์วิดีโอ (Export MP4)' : '💾 Save Video (Export)'}</span>
           </button>
         </div>
       </div>
 
       {/* Settings Panel */}
       {showConfig && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3.5 text-xs">
-          <div>
-            <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
-              <span>{isTh ? 'ความกว้างการอ้าปาก' : 'Intensity'}</span>
-              <span className="text-amber-400 font-mono">{config.intensity.toFixed(1)}x</span>
-            </div>
-            <input
-              type="range"
-              min="0.5"
-              max="2.2"
-              step="0.1"
-              value={config.intensity}
-              onChange={(e) => onChangeConfig({ ...config, intensity: Number(e.target.value) })}
-              className="w-full accent-amber-400 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
-            />
-          </div>
-
-          <div>
-            <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
-              <span>{isTh ? 'การขยับคาง/ขากรรไกร' : 'Jaw Shift'}</span>
-              <span className="text-amber-400 font-mono">
-                {config.jawDisplacement <= 0.05
-                  ? isTh
-                    ? '0 (คางอยู่นิ่ง)'
-                    : '0 (Fixed chin)'
-                  : `${config.jawDisplacement.toFixed(1)}x`}
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3.5 text-xs">
+          {/* Mouth Style Selector (New feature matching user's requested photo) */}
+          <div className="rounded-lg bg-zinc-900/90 border border-zinc-800 p-2.5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-semibold text-white flex items-center gap-1.5">
+                <span>👄</span>
+                <span>{isTh ? 'สไตล์การขยับปาก (Mouth Lip-Sync Style)' : 'Mouth Lip-Sync Style'}</span>
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30">
+                {isTh ? 'ตรงตามรูปภาพ' : 'Photo Matched'}
               </span>
             </div>
-            <input
-              type="range"
-              min="0"
-              max="1.5"
-              step="0.1"
-              value={config.jawDisplacement}
-              onChange={(e) =>
-                onChangeConfig({ ...config, jawDisplacement: Number(e.target.value) })
-              }
-              className="w-full accent-amber-400 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
-            />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onChangeConfig({ ...config, mouthStyle: 'realistic-3d' })}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition border ${
+                  config.mouthStyle === 'realistic-3d' || !config.mouthStyle
+                    ? 'bg-amber-500 text-zinc-950 border-amber-400 font-bold shadow-md shadow-amber-500/10'
+                    : 'bg-zinc-800/80 text-zinc-300 hover:text-white border-zinc-700'
+                }`}
+              >
+                <span>✨</span>
+                <span>{isTh ? '3D ยิ้มฟันสวย (แบบในรูป)' : '3D Photoreal Smile'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeConfig({ ...config, mouthStyle: 'anime' })}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition border ${
+                  config.mouthStyle === 'anime'
+                    ? 'bg-amber-500 text-zinc-950 border-amber-400 font-bold shadow-md shadow-amber-500/10'
+                    : 'bg-zinc-800/80 text-zinc-300 hover:text-white border-zinc-700'
+                }`}
+              >
+                <span>🎨</span>
+                <span>{isTh ? 'อนิเมะ / การ์ตูน (Anime)' : 'Anime / Cartoon'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeConfig({ ...config, mouthStyle: 'classic' })}
+                className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition border ${
+                  config.mouthStyle === 'classic'
+                    ? 'bg-amber-500 text-zinc-950 border-amber-400 font-bold shadow-md shadow-amber-500/10'
+                    : 'bg-zinc-800/80 text-zinc-300 hover:text-white border-zinc-700'
+                }`}
+              >
+                <span>🎬</span>
+                <span>{isTh ? 'คลาสสิก (Classic)' : 'Classic'}</span>
+              </button>
+            </div>
           </div>
 
-          <div>
-            <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
-              <span>{isTh ? 'เฟรมเรต (FPS)' : 'Target FPS'}</span>
-              <span className="text-amber-400 font-mono">{config.fps} fps</span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
+                <span>{isTh ? 'ความกว้างการอ้าปาก' : 'Intensity'}</span>
+                <span className="text-amber-400 font-mono">{config.intensity.toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="2.2"
+                step="0.1"
+                value={config.intensity}
+                onChange={(e) => onChangeConfig({ ...config, intensity: Number(e.target.value) })}
+                className="w-full accent-amber-400 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
+              />
             </div>
-            <div className="flex gap-1">
-              {[24, 30, 60].map((fps) => (
-                <button
-                  key={fps}
-                  type="button"
-                  onClick={() => onChangeConfig({ ...config, fps })}
-                  className={`flex-1 rounded py-1 text-[11px] font-mono font-semibold transition ${
-                    config.fps === fps ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-800 text-zinc-400'
-                  }`}
-                >
-                  {fps}
-                </button>
-              ))}
+
+            <div>
+              <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
+                <span>{isTh ? 'การขยับคาง/ขากรรไกร' : 'Jaw Shift'}</span>
+                <span className="text-amber-400 font-mono">
+                  {config.jawDisplacement <= 0.05
+                    ? isTh
+                      ? '0 (คางอยู่นิ่ง)'
+                      : '0 (Fixed chin)'
+                    : `${config.jawDisplacement.toFixed(1)}x`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1.5"
+                step="0.1"
+                value={config.jawDisplacement}
+                onChange={(e) =>
+                  onChangeConfig({ ...config, jawDisplacement: Number(e.target.value) })
+                }
+                className="w-full accent-amber-400 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
+                <span>{isTh ? 'ความโค้งรอยยิ้ม (Smile)' : 'Smile Curve'}</span>
+                <span className="text-amber-400 font-mono">+{config.smileCurve ?? 3}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="6"
+                step="1"
+                value={config.smileCurve ?? 3}
+                onChange={(e) =>
+                  onChangeConfig({ ...config, smileCurve: Number(e.target.value) })
+                }
+                className="w-full accent-amber-400 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between text-[11px] text-zinc-400 mb-1">
+                <span>{isTh ? 'เฟรมเรต (FPS)' : 'Target FPS'}</span>
+                <span className="text-amber-400 font-mono">{config.fps} fps</span>
+              </div>
+              <div className="flex gap-1">
+                {[24, 30, 60].map((fps) => (
+                  <button
+                    key={fps}
+                    type="button"
+                    onClick={() => onChangeConfig({ ...config, fps })}
+                    className={`flex-1 rounded py-1 text-[11px] font-mono font-semibold transition ${
+                      config.fps === fps ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-800 text-zinc-400'
+                    }`}
+                  >
+                    {fps}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-col justify-center gap-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-zinc-800/80">
             <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 text-[11px]">
               <input
                 type="checkbox"
@@ -679,7 +879,25 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
                 onChange={(e) => onChangeConfig({ ...config, enableTeeth: e.target.checked })}
                 className="rounded border-zinc-700 text-amber-500 focus:ring-amber-500"
               />
-              <span>{isTh ? 'แสดงฟัน & ลิ้นในปาก' : 'Render Teeth & Cavity'}</span>
+              <span>{isTh ? '🦷 ฟันบน 3D สมจริง' : '🦷 3D Upper Teeth'}</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 text-[11px]">
+              <input
+                type="checkbox"
+                checked={config.showLowerTeeth !== false}
+                onChange={(e) => onChangeConfig({ ...config, showLowerTeeth: e.target.checked })}
+                className="rounded border-zinc-700 text-amber-500 focus:ring-amber-500"
+              />
+              <span>{isTh ? '🦷 แถวฟันล่าง (แบบในรูป)' : '🦷 Lower Teeth'}</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 text-[11px]">
+              <input
+                type="checkbox"
+                checked={config.lipGloss !== false}
+                onChange={(e) => onChangeConfig({ ...config, lipGloss: e.target.checked })}
+                className="rounded border-zinc-700 text-amber-500 focus:ring-amber-500"
+              />
+              <span>{isTh ? '✨ ริมฝีปากเงางาม (Gloss)' : '✨ Lip Gloss Sheen'}</span>
             </label>
             <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 text-[11px]">
               <input
@@ -694,18 +912,7 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
                 }}
                 className="rounded border-zinc-700 text-amber-500 focus:ring-amber-500"
               />
-              <span>{isTh ? '👁️ ดวงตากระพริบ (Eye Blinking)' : '👁️ Eye Blinking'}</span>
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer text-zinc-300 text-[11px]">
-              <input
-                type="checkbox"
-                checked={config.enableIdleMotion}
-                onChange={(e) =>
-                  onChangeConfig({ ...config, enableIdleMotion: e.target.checked })
-                }
-                className="rounded border-zinc-700 text-amber-500 focus:ring-amber-500"
-              />
-              <span>{isTh ? 'ขยับคอ/ศีรษะ (Head & Neck Motion)' : 'Head & Neck Motion'}</span>
+              <span>{isTh ? '👁️ ดวงตากระพริบ' : '👁️ Eye Blinking'}</span>
             </label>
           </div>
         </div>
@@ -844,6 +1051,17 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
           >
             <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
             <span>{isTh ? '⚡ ทดสอบกระพริบตา' : 'Test Blink'}</span>
+          </button>
+
+          {/* Test 3D Mouth Motion Button (Matching user's photo) */}
+          <button
+            type="button"
+            onClick={handleTriggerMouthTest}
+            className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/25 transition active:scale-95 shadow-sm"
+            title={isTh ? 'ทดสอบการขยับปากและฟัน 3D แบบในรูปภาพทันที' : 'Test 3D mouth and teeth movement'}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+            <span>{isTh ? '👄 ทดสอบขยับปากแบบในรูป' : '👄 Test 3D Mouth'}</span>
           </button>
         </div>
       </div>
@@ -1094,6 +1312,18 @@ export const StudioPlayer: React.FC<StudioPlayerProps> = ({
             title={isLooping ? 'Looping enabled' : 'Single pass'}
           >
             LOOP
+          </button>
+
+          {/* Quick Export/Save button on Timeline Bar */}
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={(!imageElement || !audioBuffer) || isExporting}
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-500 text-white px-2.5 py-1 text-xs font-bold transition shadow disabled:opacity-40"
+            title={isTh ? 'เซฟไฟล์วิดีโอนี้ลงเครื่อง (MP4/WebM)' : 'Save video to device'}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{isTh ? 'เซฟวิดีโอ' : 'Save Video'}</span>
           </button>
         </div>
 

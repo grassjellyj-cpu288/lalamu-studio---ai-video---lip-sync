@@ -1,4 +1,5 @@
 import { AvatarPreset, AudioPreset, ProjectSourceFile } from '../types';
+import smiling3DImg from '../assets/images/smiling_3d_character_1788503436812.jpg';
 import cartoonArchaeologistImg from '../assets/images/cartoon_archaeologist_1788493512804.jpg';
 import cartoonBoyImg from '../assets/images/cartoon_boy_1788418367099.jpg';
 import cartoonGirlImg from '../assets/images/cartoon_girl_1788418386904.jpg';
@@ -7,6 +8,26 @@ import cartoonAnimeImg from '../assets/images/cartoon_anime_hero_1788418430512.j
 import cartoonRobotImg from '../assets/images/cartoon_robot_1788418413245.jpg';
 
 export const AVATAR_PRESETS: AvatarPreset[] = [
+  {
+    id: 'smiling-3d-character',
+    name: 'Anya (3D Smile / ปากยิ้มฟันสวยแบบในรูป)',
+    category: 'character',
+    styleType: 'realistic',
+    imageUrl: smiling3DImg,
+    defaultMouthBox: {
+      x: 50,
+      y: 69,
+      width: 22,
+      height: 11,
+      chinY: 82,
+    },
+    defaultEyes: {
+      enabled: true,
+      blinkInterval: 3.2,
+      leftEye: { x: 38, y: 46, radiusX: 6.0, radiusY: 6.5 },
+      rightEye: { x: 62, y: 46, radiusX: 6.0, radiusY: 6.5 },
+    },
+  },
   {
     id: 'cartoon-archaeologist',
     name: 'Dr. Maya (นักโบราณคดีแดนสยาม)',

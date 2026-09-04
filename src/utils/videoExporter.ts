@@ -1,4 +1,4 @@
-import { MouthLandmarks, LipSyncConfig, FrameEnergyData, EyeLandmarks } from '../types';
+import { MouthLandmarks, LipSyncConfig, FrameEnergyData, EyeLandmarks, BackgroundConfig } from '../types';
 import { renderLipSyncFrame } from './lipsyncRenderer';
 import { getAudioContext } from './audioAnalyzer';
 
@@ -20,7 +20,10 @@ export async function exportLipSyncVideo(
   frames: FrameEnergyData[],
   config: LipSyncConfig,
   onProgress: (progress: ExportProgress) => void,
-  eyes?: EyeLandmarks
+  eyes?: EyeLandmarks,
+  backgroundConfig?: BackgroundConfig,
+  bgImgElement?: HTMLImageElement | null,
+  cutoutCanvas?: HTMLCanvasElement | null
 ): Promise<{ blob: Blob; url: string; filename: string; mimeType: string }> {
   const fps = config.fps || 30;
   const totalFrames = frames.length;
@@ -159,7 +162,20 @@ export async function exportLipSyncVideo(
         const aperture = frameData ? frameData.aperture : 0;
 
         // Render frame
-        renderLipSyncFrame(ctx!, image, mouth, aperture, config, timeSec, false, eyes);
+        renderLipSyncFrame(
+          ctx!,
+          image,
+          mouth,
+          aperture,
+          config,
+          timeSec,
+          false,
+          eyes,
+          undefined,
+          backgroundConfig,
+          bgImgElement,
+          cutoutCanvas
+        );
 
         currentFrame++;
         const percent = Math.min(99, Math.round((currentFrame / totalFrames) * 100));

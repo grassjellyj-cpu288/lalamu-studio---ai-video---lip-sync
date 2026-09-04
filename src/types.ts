@@ -1,3 +1,39 @@
+export interface BackgroundPreset {
+  id: string;
+  name: string;
+  nameTh: string;
+  category: 'office' | 'studio' | 'education' | 'anime' | 'chroma' | 'creative';
+  type?: 'preset' | 'custom' | 'color' | 'original';
+  imageUrl?: string;
+  thumbnail?: string;
+  color?: string;
+  gradient?: string;
+  description: string;
+  descriptionTh: string;
+  blur?: number;
+  brightness?: number;
+}
+
+export interface BackgroundConfig {
+  enabled: boolean;
+  type: 'preset' | 'custom' | 'color' | 'original';
+  presetId?: string;
+  customImageUrl?: string;
+  customImageName?: string;
+  color?: string;
+  gradient?: string;
+  blur: number; // 0 to 20 px for depth-of-field bokeh
+  brightness: number; // 50% to 150%
+  // Subject matting / Chroma key
+  keyingMode: 'auto' | 'chroma' | 'vignette' | 'transparent' | 'none';
+  keyColor: string; // hex color e.g. #00ff00 or #ffffff
+  tolerance: number; // 5 to 100
+  feather: number; // 0 to 15 px
+  characterScale: number; // 0.5 to 1.5 (default 1.0)
+  characterPositionX: number; // -50% to 50% (default 0)
+  characterPositionY: number; // -50% to 50% (default 0)
+}
+
 export interface EyePosition {
   x: number; // percentage of image width (0-100)
   y: number; // percentage of image height (0-100)
@@ -83,6 +119,11 @@ export interface LipSyncConfig {
   showTriScale?: boolean; // toggle Tri-Scale (3-part facial rule of thirds) & coordinate ruler
   seamlessBlend?: boolean; // smooth edge feathering and lip tone blending
   lipFeather?: number; // feather blur radius (0-10px)
+  mouthStyle?: 'realistic-3d' | 'anime' | 'classic'; // 'realistic-3d' matches the user's smiling teeth photo
+  showLowerTeeth?: boolean; // realistic lower teeth visible when opening mouth
+  lipGloss?: boolean; // glossy reflection on lower lip like in photo
+  smileCurve?: number; // smile curvature (-5 to 10, default 3)
+  lipColor?: 'natural' | 'terracotta' | 'nude-rose' | 'ruby';
 }
 
 export interface FrameEnergyData {

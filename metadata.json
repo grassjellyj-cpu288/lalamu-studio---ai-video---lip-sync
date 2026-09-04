@@ -1,6 +1,6 @@
 {
   "name": "LALAMU STUDIO - AI Video & Lip Sync",
-  "description": "AI Video & Lip Sync Studio — อัปโหลดรูปภาพและเสียง สร้างวิดีโอปากขยับตามเสียงพูด พร้อมพรีวิวและดาวน์โหลดวิดีโอทันที",
+  "description": "AI Video & Lip Sync Studio — อัปโหลดรูปภาพการ์ตูน/อนิเมะและเสียง เปลี่ยนฉากหลัง นำเข้ารูปจาก PC สร้างวิดีโอปากขยับตามเสียงพูด พร้อมพรีวิวและเซฟเป็นไฟล์วิดีโอทันที",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
